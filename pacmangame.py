@@ -57,6 +57,7 @@ BLUE = (0, 0, 255)
 RED = (255, 0, 0) # Color de los fantasmas
 CYAN = (0, 255, 255) # Color de los fantasmas
 MAGENTA = (255, 0, 255) # Color de los fantasmas
+SKY_BLUE = (135, 206, 235)  # Color azul cielo para los fantasmas asustados
 GREEN = (0, 255, 0) # Color de los fantasmas
 # Inicializar Pygame
 pygame.init()
@@ -66,9 +67,17 @@ pygame.display.set_caption("Pacman")
 # Fuente para el mensaje de "Game Over"
 font = pygame.font.Font(None, 74)
 
+# Estado del juego
+game_over = False
+you_win = False
+
+# Efecto de super galleta
+super_cookie_active = False
+super_cookie_end_time = None
+
 # Función para reiniciar el juego
 def reset_game():
-    global pacman_pos, pacman_direction, pacman_mouth_open, ghost_update_counter, ghosts, game_over, you_win, LABERINTO
+    global pacman_pos, pacman_direction, pacman_mouth_open, ghost_update_counter, ghosts, game_over, you_win, LABERINTO, super_cookie_active, super_cookie_end_time
     # Reiniciar posición de Pacman
     pacman_pos = [14, 13]
     pacman_direction = [0, 0]
@@ -76,10 +85,10 @@ def reset_game():
     ghost_update_counter = 0
     # Reiniciar posición de los fantasmas
     ghosts = {
-        "red": {"pos": [10, 9], "color": RED, "target": None, "speed": 0.5},
-        "green": {"pos": [10, 10], "color": GREEN, "target": None, "speed": 0.5},
-        "cyan": {"pos": [10, 11], "color": CYAN, "target": None, "speed": 0.5},
-        "magenta": {"pos": [10, 12], "color": MAGENTA, "target": None, "speed": 0.5}
+        "red": {"pos": [10, 9], "color": RED, "target": None, "speed": 0.5, "original_color": RED, "original_pos": [10, 9]},
+        "green": {"pos": [10, 10], "color": GREEN, "target": None, "speed": 0.5, "original_color": GREEN, "original_pos": [10, 10]},
+        "cyan": {"pos": [10, 11], "color": CYAN, "target": None, "speed": 0.5, "original_color": CYAN, "original_pos": [10, 11]},
+        "magenta": {"pos": [10, 12], "color": MAGENTA, "target": None, "speed": 0.5, "original_color": MAGENTA, "original_pos": [10, 12]}
     }
 
     # Reiniciar el laberinto (restaurar galletas y supergalletas)
@@ -113,6 +122,8 @@ def reset_game():
     # Reiniciar estado del juego
     game_over = False
     you_win = False
+    super_cookie_active = False
+    super_cookie_end_time = None
 
 # Posición inicial de Pacman
 pacman_pos = [14, 13]
@@ -121,11 +132,11 @@ pacman_mouth_open = True
 
 # Posiciones iniciales de los fantasmas
 ghosts = {
-    "red": {"pos": [10, 9], "color": RED, "target": None},
-    "green": {"pos": [10, 10], "color": GREEN, "target": None},
-    "cyan": {"pos": [10, 11], "color": CYAN, "target": None},
-    "magenta": {"pos": [10, 12], "color": MAGENTA, "target": None}
-}
+        "red": {"pos": [10, 9], "color": RED, "target": None, "speed": 0.5, "original_color": RED, "original_pos": [10, 9]},
+        "green": {"pos": [10, 10], "color": GREEN, "target": None, "speed": 0.5, "original_color": GREEN, "original_pos": [10, 10]},
+        "cyan": {"pos": [10, 11], "color": CYAN, "target": None, "speed": 0.5, "original_color": CYAN, "original_pos": [10, 11]},
+        "magenta": {"pos": [10, 12], "color": MAGENTA, "target": None, "speed": 0.5, "original_color": MAGENTA, "original_pos": [10, 12]}
+    }
 
 # Contador de actualización para los fantasmas
 ghost_update_counter = 0
@@ -165,7 +176,7 @@ def draw_ghosts():
 
 # Función para mover a Pacman
 def move_pacman():
-    global pacman_pos, pacman_mouth_open
+    global pacman_pos, pacman_mouth_open, super_cookie_active, super_cookie_end_time
     new_x = pacman_pos[0] + pacman_direction[0]
     new_y = pacman_pos[1] + pacman_direction[1]
 
@@ -183,8 +194,14 @@ def move_pacman():
             pacman_pos[0] = 0
 
     # Comer galletas
-    if LABERINTO[pacman_pos[1]][pacman_pos[0]] == 2 or LABERINTO[pacman_pos[1]][pacman_pos[0]] == 3:
+    if LABERINTO[pacman_pos[1]][pacman_pos[0]] == 2:
         LABERINTO[pacman_pos[1]][pacman_pos[0]] = 0
+    elif LABERINTO[pacman_pos[1]][pacman_pos[0]] == 3:
+        LABERINTO[pacman_pos[1]][pacman_pos[0]] = 0
+        super_cookie_active = True
+        super_cookie_end_time = datetime.now() + timedelta(seconds=10)
+        for ghost in ghosts.values():
+            ghost["color"] = SKY_BLUE  # Cambiar el color de los fantasmas a azul cielo
 
 # Función para calcular la distancia entre dos puntos
 def distance(a, b):
@@ -192,11 +209,11 @@ def distance(a, b):
 
 # Función para mover los fantasmas
 def move_ghosts():
-    global ghost_update_counter
+    global ghost_update_counter, super_cookie_active, super_cookie_end_time
     ghost_update_counter += 1
-    
+
     # Los fantasmas se mueven cada 2 iteraciones (mitad de velocidad de Pacman)
-    if ghost_update_counter >= 3:
+    if ghost_update_counter >= 2:
         ghost_update_counter = 0
         for ghost in ghosts.values():
             x, y = ghost["pos"]
@@ -210,30 +227,45 @@ def move_ghosts():
                     if LABERINTO[new_y][new_x] != 1:
                         possible_moves.append((new_x, new_y))
 
-            # Elegir el movimiento según el comportamiento del fantasma
-            if ghost["color"] == RED:
-                # Fantasma rojo: ruta más corta hacia Pacman
-                ghost["target"] = pacman_pos
-            elif ghost["color"] == GREEN:
-                # Fantasma verde: ruta corta hacia 4 posiciones delante de Pacman
-                target_x = pacman_pos[0] + pacman_direction[0] * 4
-                target_y = pacman_pos[1] + pacman_direction[1] * 4
-                ghost["target"] = [target_x, target_y]
-            elif ghost["color"] == CYAN:
-                # Fantasma cyan: radio de 8 posiciones detrás de Pacman
-                target_x = pacman_pos[0] - pacman_direction[0] * 8
-                target_y = pacman_pos[1] - pacman_direction[1] * 8
-                ghost["target"] = [target_x, target_y]
-            elif ghost["color"] == MAGENTA:
-                # Fantasma magenta: posición de Pacman a dos cuadros delante y 180 grados contrario al fantasma rojo
-                target_x = pacman_pos[0] + pacman_direction[0] * 2
-                target_y = pacman_pos[1] + pacman_direction[1] * 2
-                ghost["target"] = [target_x, target_y]
+            # Comportamiento de los fantasmas
+            if super_cookie_active:
+                # Si la super galleta está activa, los fantasmas huyen de Pacman
+                target_x = pacman_pos[0]
+                target_y = pacman_pos[1]
+                # Elegir el movimiento más alejado de Pacman
+                best_move = max(possible_moves, key=lambda move: distance(move, (target_x, target_y)))
+            else:
+                # Comportamiento normal de los fantasmas
+                if ghost["color"] == RED:
+                    # Fantasma rojo: ruta más corta hacia Pacman
+                    ghost["target"] = pacman_pos
+                elif ghost["color"] == GREEN:
+                    # Fantasma verde: ruta corta hacia 4 posiciones delante de Pacman
+                    target_x = pacman_pos[0] + pacman_direction[0] * 4
+                    target_y = pacman_pos[1] + pacman_direction[1] * 4
+                    ghost["target"] = [target_x, target_y]
+                elif ghost["color"] == CYAN:
+                    # Fantasma cyan: radio de 8 posiciones detrás de Pacman
+                    target_x = pacman_pos[0] - pacman_direction[0] * 8
+                    target_y = pacman_pos[1] - pacman_direction[1] * 8
+                    ghost["target"] = [target_x, target_y]
+                elif ghost["color"] == MAGENTA:
+                    # Fantasma magenta: posición de Pacman a dos cuadros delante y 180 grados contrario al fantasma rojo
+                    target_x = pacman_pos[0] + pacman_direction[0] * 2
+                    target_y = pacman_pos[1] + pacman_direction[1] * 2
+                    ghost["target"] = [target_x, target_y]
 
-            # Elegir el movimiento más cercano al objetivo
-            if ghost["target"]:
-                best_move = min(possible_moves, key=lambda move: distance(move, ghost["target"]))
-                ghost["pos"] = list(best_move)
+                # Elegir el movimiento más cercano al objetivo
+                if ghost["target"]:
+                    best_move = min(possible_moves, key=lambda move: distance(move, ghost["target"]))
+
+            ghost["pos"] = list(best_move)
+            
+             # Verificar si el efecto de la super galleta ha terminado
+    if super_cookie_active and datetime.now() >= super_cookie_end_time:
+        super_cookie_active = False
+        for ghost in ghosts.values():
+            ghost["color"] = ghost["original_color"]  # Restaurar el color original de los fantasmas
 
 # Función para verificar si no quedan galletas
 def check_win():
@@ -290,7 +322,13 @@ while running:
         # Verificar colisiones entre Pacman y los fantasmas
         for ghost in ghosts.values():
             if ghost["pos"] == pacman_pos:
-                game_over = True
+                if super_cookie_active:
+                    # Si la super galleta está activa, el fantasma vuelve a su posición inicial
+                    ghost["pos"] = ghost["original_pos"]  # Posición inicial del fantasma rojo (ajustar para otros fantasmas)
+                    
+                    ghost["color"] = ghost["original_color"]  # Restaurar el color original
+                else:
+                    game_over = True
   
         pygame.display.flip()
         clock.tick(10)
